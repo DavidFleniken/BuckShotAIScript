@@ -27,6 +27,8 @@ public class BuckshotScript : Agent
     int d_cigNum = 0;
     bool p_cuffed = false;
     bool d_cuffed = false;
+    bool p_lastCuffed = false;
+    bool d_lastCuffed = false;
     int thinksNextShot = -1;
     int sawDmg = 0; //will change to 1 when sawed off, adding 1 to total damage
 
@@ -64,6 +66,7 @@ public class BuckshotScript : Agent
     [SerializeField] TMP_Text rounds;
     [SerializeField] TMP_Text turns;
     [SerializeField] TMP_Text generation;
+    [SerializeField] TMP_Text lastAction;
     int genNum = 0;
     [SerializeField] TMP_Text p_wins;
     int playerWins = 0;
@@ -155,6 +158,10 @@ public class BuckshotScript : Agent
 
     void newSubRound()
     {
+        sawDmg = 0;
+        StartCoroutine(newSubRoundWait());
+        turnInProgress = false;
+        isPlayerTurn = true;
         //add new items
         itemNum = UnityEngine.Random.Range(1, 5);
         int pItemAdd = itemNum;
@@ -219,11 +226,20 @@ public class BuckshotScript : Agent
 
     IEnumerator wait()
     {
+        Debug.Log("waited at time" + Time.time);
         checkEndofShots();
         checkWinCondition();
         sawDmg = 0;
+        sendToCanvas();
         yield return new WaitForSeconds(secBetweenTurns);
+        lastAction.text = "";
         turnInProgress = false;
+    }
+
+    IEnumerator newSubRoundWait()
+    {
+        yield return new WaitForSeconds(secBetweenTurns);
+        lastAction.text = "";
     }
 
     void checkWinCondition()
@@ -245,12 +261,14 @@ public class BuckshotScript : Agent
             EndEpisode();
         }
     }
-    void checkEndofShots()
+    bool checkEndofShots()
     {
-        if (liveNum + blankNum < 1)
+        if ((liveNum) + blankNum < 1)
         {
             newSubRound();
+            return true;
         }
+        return false;
     }
 
     private void sendToCanvas()
@@ -313,18 +331,32 @@ public class BuckshotScript : Agent
             case 0:
                 return -1;
             case 1:
+                if(dealerHealth == healthMax)
+                {
+                    return -1;
+                }
                 dealerHealth++;
-                if(dealerHealth > healthMax)
+                if (dealerHealth > healthMax)
                 {
                     dealerHealth = healthMax;
                 }
                 d_cigNum--;
                 return 1;
             case 2:
+                if (thinksNextShot != -1)
+                {
+                    return -1;
+                }
                 thinksNextShot = nextShot;
                 return 1;
             case 3:
+                if (p_cuffed || p_lastCuffed)
+                {
+                    return -1;
+                }
                 p_cuffed = true;
+                return 1;
+            case 4:
                 if (nextShot == 1)
                 {
                     liveNum--;
@@ -337,15 +369,17 @@ public class BuckshotScript : Agent
                 if (nextShot < liveNum)                                     //i should make it a method... ill do it later
                 {
                     nextShot = 1;
-                    liveNum--;
                 }
                 else
                 {
                     nextShot = 0;
-                    blankNum--;
                 }
                 return 1;
             case 5:
+                if(sawDmg > 0)
+                {
+                    return -1;
+                }
                 sawDmg = 1;
                 return 1;
         }
@@ -370,9 +404,17 @@ public class BuckshotScript : Agent
                 p_cigNum--;
                 return 1;
             case 2:
+                if(thinksNextShot != -1)
+                {
+                    return -1;
+                }
                 thinksNextShot = nextShot;
                 return 1;
             case 3:
+                if (d_cuffed || d_lastCuffed)
+                {
+                    return -1;
+                }
                 d_cuffed = true;
                 return 1;
             case 4:
@@ -395,6 +437,10 @@ public class BuckshotScript : Agent
                 }
                 return 1;
             case 5:
+                if(sawDmg > 0)
+                {
+                    return -1;
+                }
                 sawDmg = 1;
                 return 1;
         }
@@ -414,8 +460,10 @@ public class BuckshotScript : Agent
             {
                 isPlayerTurn = true;
                 d_cuffed = false;
+                d_lastCuffed = true;
                 return;
             }
+            d_lastCuffed = false;
             turnInProgress = true;
             bool willSetPlayerTurn = true;
 
@@ -437,15 +485,43 @@ public class BuckshotScript : Agent
                 //attempt to use item
                 if (dealerUseItem(dealerItemArray[i]) == 1)//successfully used item
                 {
+                    lastAction.text += "\nDealer Used " + itemIntToString(dealerItemArray[i]);
                     dealerItemArray[i] = 0;
+                    if (checkEndofShots())
+                    {
+                        return;
+                    }
                 }
             }
 
             //dealer shoots
+
+            //last bullet check, dealer will make best play
             if ((liveNum + blankNum) == 1 && nextShot == 1)
             {
-                playerHealth -= 1 + sawDmg;
-            }//else dealer shoots self, but also end of bullets, so nothing happens
+                if(nextShot == 1)
+                {
+                    lastAction.text += "\nDealer Successfully Shot Player for " + (1 + sawDmg) + " damage;";
+                    playerHealth -= (1 + sawDmg);
+
+                    thinksNextShot = -1; //must set this back to -1 at the end of every turn, so be careful if you use returns here or smth
+
+                    sendToCanvas();
+                    isPlayerTurn = willSetPlayerTurn;
+                    StartCoroutine(wait());
+                    return;
+                }
+                else
+                {
+                    lastAction.text += "\nDealer last bullet blank";
+                    thinksNextShot = -1; //must set this back to -1 at the end of every turn, so be careful if you use returns here or smth
+
+                    isPlayerTurn = willSetPlayerTurn;
+                    StartCoroutine(wait());
+                    return;
+                }
+            }
+            
 
             int dealerShot;
             if(thinksNextShot != -1)
@@ -462,9 +538,11 @@ public class BuckshotScript : Agent
                 if(nextShot == 1)
                 {
                     dealerHealth -= 1 + sawDmg;
+                    lastAction.text += "\nDealer Shot himself for " + (1 + sawDmg) + " damage;";
                 }
                 else
                 {
+                    lastAction.text += "\nDealer shot himself with a blank";
                     willSetPlayerTurn = false; //dealer will go again
                 }
             }
@@ -472,13 +550,18 @@ public class BuckshotScript : Agent
             {
                 if (nextShot == 1)
                 {
+                    lastAction.text += "\nDealer Successfully Shot Player for " + (1 + sawDmg) + " damage;";
                     playerHealth -= 1 + sawDmg;
-                }//else nothing
+                }
+                else
+                //else nothing
+                {
+                    lastAction.text += "\nDealer Shot Player with blank";
+                }
             }
 
             thinksNextShot = -1; //must set this back to -1 at the end of every turn, so be careful if you use returns here or smth
 
-            sendToCanvas();
             isPlayerTurn = willSetPlayerTurn;
             StartCoroutine(wait());
         }
@@ -489,8 +572,10 @@ public class BuckshotScript : Agent
             {
                 isPlayerTurn = false;
                 p_cuffed = false;
+                p_lastCuffed = true;
                 return;
             }
+            p_lastCuffed = false;
             turnInProgress = true;
 
             nextShot = UnityEngine.Random.Range(0, (liveNum + blankNum));
@@ -530,7 +615,12 @@ public class BuckshotScript : Agent
             {
                 if(playerUseItem(playerItemArray[i]) == 1)//successfully used item
                 {
+                    lastAction.text += "\nPlayer used " + itemIntToString(playerItemArray[i]);
                     playerItemArray[i] = 0;
+                    if (checkEndofShots())
+                    {
+                        return;
+                    }
                     RequestDecision();
                     return;//??? maybe? like I dont want the reset of the function to run, so I should return, right?
                 }
@@ -543,11 +633,13 @@ public class BuckshotScript : Agent
         {
             if (nextShot == 1)
             {
-                playerHealth -= 1 + sawDmg;
+                lastAction.text += "\nPlayer Shot themselves for " + (1 + sawDmg) + " damage";
+                playerHealth -= (1 + sawDmg);
                 liveNum--;
             }
             else
             {
+                lastAction.text += "\nPlayer Shot themselves with a blank";
                 isPlayerTurn = true; //player will go again
                 blankNum--;
             }
@@ -556,39 +648,50 @@ public class BuckshotScript : Agent
         {
             if (nextShot == 1)
             {
+                lastAction.text += "\nPlayer Shot dealer for " + (1 + sawDmg) + " damage;";
                 dealerHealth -= 1 + sawDmg;
                 liveNum--;
             }
             else
             {
+                lastAction.text += "\nPlayer Shot dealer with a blank";
                 blankNum--;
             }
         }
 
+        isPlayerTurn = false;
         thinksNextShot = -1; //so technically should always be -1 when it gets here, but just in case
-        sendToCanvas();
         StartCoroutine(wait());
     }
 
     public override void CollectObservations(VectorSensor sensor)
     {
-        //first 8 observations are items
+        //first 16 abservations are items
         for (int i = 0; i < 8;  i++)
         {
             sensor.AddObservation(playerItemArray[i]);
+            sensor.AddObservation(dealerItemArray[i]);
         }
 
-        //next are number of live and blanks
+        //next 2 are number of live and blanks
         sensor.AddObservation(liveNum); 
         sensor.AddObservation(blankNum);
 
-        //then player and dealer health
+        //then next 2 player and dealer health
         sensor.AddObservation(playerHealth);
         sensor.AddObservation(dealerHealth);
 
         //I literally dont know if this works, i can only pray
         sensor.AddObservation(thinksNextShot);
+        Debug.Log(thinksNextShot);
         thinksNextShot = -1; //reset to avoid infinite loop hopefully
+
+        //i think above worked, not sure
+        //next two is saw and if dealer is cuffed
+        sensor.AddObservation(sawDmg);
+        sensor.AddObservation(d_cuffed);
+
+        //23 observations
     }
     #endregion
 }
