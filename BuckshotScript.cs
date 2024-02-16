@@ -31,6 +31,7 @@ public class BuckshotScript : Agent
     bool d_lastCuffed = false;
     int thinksNextShot = -1;
     int sawDmg = 0; //will change to 1 when sawed off, adding 1 to total damage
+    int dealerShot;
 
     int nextShot; //0 blank, 1 live
 
@@ -102,6 +103,10 @@ public class BuckshotScript : Agent
 
     private void roundStart() 
     {
+        p_cuffed = false;
+        p_lastCuffed = false;
+        d_cuffed = false;
+        d_lastCuffed = false;
         //reset items, could be optimized with give items, but idc rn
         for (int i = 0; i < 8; i++)
         {
@@ -158,10 +163,12 @@ public class BuckshotScript : Agent
 
     void newSubRound()
     {
+        p_cuffed = false;
+        p_lastCuffed = false;
+        d_cuffed = false;
+        d_lastCuffed = false;
         sawDmg = 0;
         StartCoroutine(newSubRoundWait());
-        turnInProgress = false;
-        isPlayerTurn = true;
         //add new items
         itemNum = UnityEngine.Random.Range(1, 5);
         int pItemAdd = itemNum;
@@ -208,8 +215,6 @@ public class BuckshotScript : Agent
         int totalShots = UnityEngine.Random.Range(2, 9);
         liveNum = (int)Math.Floor(totalShots / 2f);
         blankNum = totalShots - liveNum;
-
-        sendToCanvas();
     }
 
 
@@ -240,6 +245,9 @@ public class BuckshotScript : Agent
     {
         yield return new WaitForSeconds(secBetweenTurns);
         lastAction.text = "";
+        turnInProgress = false;
+        isPlayerTurn = true;
+        sendToCanvas();
     }
 
     void checkWinCondition()
@@ -282,7 +290,7 @@ public class BuckshotScript : Agent
         D_Health.text = "Health: " + dealerHealth +"/"+ healthMax;
 
         rounds.text = liveNum + " live\n" + blankNum + " blank";
-        if(isPlayerTurn)
+        if((isPlayerTurn || d_cuffed) && !p_cuffed)
         {
             turns.text = "Player";
         }
@@ -376,7 +384,7 @@ public class BuckshotScript : Agent
                 }
                 return 1;
             case 5:
-                if(sawDmg > 0)
+                if(sawDmg > 0 || dealerShot == 0) //cant double saw and dealer only uses saw when shooting player
                 {
                     return -1;
                 }
@@ -458,6 +466,7 @@ public class BuckshotScript : Agent
         {
             if(d_cuffed)
             {
+                lastAction.text += "\nDealer is cuffed";
                 isPlayerTurn = true;
                 d_cuffed = false;
                 d_lastCuffed = true;
@@ -467,17 +476,16 @@ public class BuckshotScript : Agent
             turnInProgress = true;
             bool willSetPlayerTurn = true;
 
+            dealerShot = UnityEngine.Random.Range(0, 2); //0 shoot self, 1 shoot player
             nextShot = UnityEngine.Random.Range(0, (liveNum + blankNum));
 
             if(nextShot < liveNum)
             {
                 nextShot = 1;
-                liveNum--;
             }
             else
             {
                 nextShot = 0;
-                blankNum--;
             }
 
             for (int i = 0; i < 8; i++)
@@ -503,6 +511,7 @@ public class BuckshotScript : Agent
                 {
                     lastAction.text += "\nDealer Successfully Shot Player for " + (1 + sawDmg) + " damage;";
                     playerHealth -= (1 + sawDmg);
+                    liveNum--;
 
                     thinksNextShot = -1; //must set this back to -1 at the end of every turn, so be careful if you use returns here or smth
 
@@ -513,6 +522,7 @@ public class BuckshotScript : Agent
                 }
                 else
                 {
+                    blankNum--;
                     lastAction.text += "\nDealer last bullet blank";
                     thinksNextShot = -1; //must set this back to -1 at the end of every turn, so be careful if you use returns here or smth
 
@@ -521,16 +531,10 @@ public class BuckshotScript : Agent
                     return;
                 }
             }
-            
 
-            int dealerShot;
             if(thinksNextShot != -1)
             {
                 dealerShot = thinksNextShot;
-            }
-            else
-            {
-                dealerShot = UnityEngine.Random.Range(0, 2); //0 shoot self, 1 shoot player
             }
             
             if(dealerShot == 0)
@@ -538,10 +542,12 @@ public class BuckshotScript : Agent
                 if(nextShot == 1)
                 {
                     dealerHealth -= 1 + sawDmg;
+                    liveNum--;
                     lastAction.text += "\nDealer Shot himself for " + (1 + sawDmg) + " damage;";
                 }
                 else
                 {
+                    blankNum--;
                     lastAction.text += "\nDealer shot himself with a blank";
                     willSetPlayerTurn = false; //dealer will go again
                 }
@@ -550,12 +556,14 @@ public class BuckshotScript : Agent
             {
                 if (nextShot == 1)
                 {
+                    liveNum--;
                     lastAction.text += "\nDealer Successfully Shot Player for " + (1 + sawDmg) + " damage;";
                     playerHealth -= 1 + sawDmg;
                 }
                 else
                 //else nothing
                 {
+                    blankNum--;
                     lastAction.text += "\nDealer Shot Player with blank";
                 }
             }
@@ -570,6 +578,7 @@ public class BuckshotScript : Agent
         {
             if (p_cuffed)
             {
+                lastAction.text += "\nPlayer is cuffed";
                 isPlayerTurn = false;
                 p_cuffed = false;
                 p_lastCuffed = true;
@@ -607,6 +616,7 @@ public class BuckshotScript : Agent
     //to next: dealer use items, finish implementing items, then done?
     public override void OnActionReceived(ActionBuffers actions)
     {
+        bool willSetPTurn = false;
 
         for(int i = 0; i < 8; i++)
         {
@@ -640,7 +650,7 @@ public class BuckshotScript : Agent
             else
             {
                 lastAction.text += "\nPlayer Shot themselves with a blank";
-                isPlayerTurn = true; //player will go again
+                willSetPTurn = true; //player will go again
                 blankNum--;
             }
         }
@@ -659,7 +669,7 @@ public class BuckshotScript : Agent
             }
         }
 
-        isPlayerTurn = false;
+        isPlayerTurn = willSetPTurn;
         thinksNextShot = -1; //so technically should always be -1 when it gets here, but just in case
         StartCoroutine(wait());
     }
@@ -684,7 +694,7 @@ public class BuckshotScript : Agent
         //I literally dont know if this works, i can only pray
         sensor.AddObservation(thinksNextShot);
         Debug.Log(thinksNextShot);
-        thinksNextShot = -1; //reset to avoid infinite loop hopefully
+        //thinksNextShot = -1; //reset to avoid infinite loop hopefully ||i dont know where/if the infinite loop existed
 
         //i think above worked, not sure
         //next two is saw and if dealer is cuffed
